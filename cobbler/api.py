@@ -788,10 +788,10 @@ class CobblerAPI:
         self.log("import_tree", [mirror_url, mirror_name, network_root, autoinstall_file, rsync_flags])
 
         # both --path and --name are required arguments
-        if mirror_url is None:
+        if mirror_url is None or not mirror_url:
             self.log("import failed.  no --path specified")
             return False
-        if mirror_name is None:
+        if mirror_name is None or not mirror_name:
             self.log("import failed.  no --name specified")
             return False
 
@@ -958,14 +958,14 @@ class CobblerAPI:
 
     def build_iso(self, iso=None,
                   profiles=None, systems=None, buildisodir=None, distro=None,
-                  standalone=None, source=None,
+                  standalone=None, airgapped=None, source=None,
                   exclude_dns=None, mkisofs_opts=None, logger=None):
         builder = action_buildiso.BuildIso(self._collection_mgr, logger=logger)
         builder.run(
             iso=iso,
             profiles=profiles, systems=systems,
             buildisodir=buildisodir, distro=distro,
-            standalone=standalone, source=source,
+            standalone=standalone, airgapped=airgapped, source=source,
             exclude_dns=exclude_dns, mkisofs_opts=mkisofs_opts
         )
 

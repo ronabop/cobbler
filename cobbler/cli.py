@@ -144,7 +144,8 @@ def report_item(remote, otype, item=None, name=None):
     elif otype == "profile":
         data = utils.to_string_from_fields(item, item_profile.FIELDS)
     elif otype == "system":
-        data = utils.to_string_from_fields(item, item_system.FIELDS)
+        data = utils.to_string_from_fields(item, item_system.FIELDS,
+                                           item_system.NETWORK_INTERFACE_FIELDS)
     elif otype == "repo":
         data = utils.to_string_from_fields(item, item_repo.FIELDS)
     elif otype == "image":
@@ -468,9 +469,9 @@ class CobblerCLI:
                     sys.exit(1)
             elif object_action == "get-autoinstall":
                 if object_type == "profile":
-                    data = self.remote.generate_autoinstall(profile=options.name)
+                    data = self.remote.generate_profile_autoinstall(options.name)
                 elif object_type == "system":
-                    data = self.remote.generate_autoinstall(system=options.name)
+                    data = self.remote.generate_system_autoinstall(options.name)
                 print data
             elif object_action == "dumpvars":
                 if object_type == "profile":
@@ -519,12 +520,13 @@ class CobblerCLI:
         if action_name == "buildiso":
 
             defaultiso = os.path.join(os.getcwd(), "generated.iso")
-            self.parser.add_option("--iso", dest="iso", default=defaultiso, help="(OPTIONAL) output ISO to this path")
+            self.parser.add_option("--iso", dest="iso", default=defaultiso, help="(OPTIONAL) output ISO to this file")
             self.parser.add_option("--profiles", dest="profiles", help="(OPTIONAL) use these profiles only")
             self.parser.add_option("--systems", dest="systems", help="(OPTIONAL) use these systems only")
             self.parser.add_option("--tempdir", dest="buildisodir", help="(OPTIONAL) working directory")
-            self.parser.add_option("--distro", dest="distro", help="(OPTIONAL) used with --standalone to create a distro-based ISO including all associated profiles/systems")
-            self.parser.add_option("--standalone", dest="standalone", action="store_true", help="(OPTIONAL) creates a standalone ISO with all required distro files on it")
+            self.parser.add_option("--distro", dest="distro", help="(OPTIONAL) used with --standalone and --airgapped to create a distro-based ISO including all associated profiles/systems")
+            self.parser.add_option("--standalone", dest="standalone", action="store_true", help="(OPTIONAL) creates a standalone ISO with all required distro files, but without any added repos")
+            self.parser.add_option("--airgapped", dest="airgapped", action="store_true", help="(OPTIONAL) creates a standalone ISO with all distro and repo files for disconnected system installation")
             self.parser.add_option("--source", dest="source", help="(OPTIONAL) used with --standalone to specify a source for the distribution files")
             self.parser.add_option("--exclude-dns", dest="exclude_dns", action="store_true", help="(OPTIONAL) prevents addition of name server addresses to the kernel boot options")
             self.parser.add_option("--mkisofs-opts", dest="mkisofs_opts", help="(OPTIONAL) extra options for mkisofs")
