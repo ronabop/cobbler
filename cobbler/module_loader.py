@@ -1,5 +1,5 @@
 """
-Module loader, adapted for cobbler usage
+Module loader, adapted for Cobbler usage
 
 Copyright 2006-2009, Red Hat, Inc and Others
 Adrian Likins <alikins@redhat.com>
@@ -20,89 +20,130 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301  USA
 """
+import logging
+from configparser import ConfigParser
+from importlib import import_module
 
-import ConfigParser
-import distutils.sysconfig
 import glob
 import os
-import sys
+from typing import Optional, Dict, Any
 
-from cexceptions import CX
-import clogger
-from utils import _, log_exc
+from cobbler.cexceptions import CX
+from cobbler.utils import log_exc
 
+# add cobbler/modules to python path
+import cobbler
 
-MODULE_CACHE = {}
-MODULES_BY_CATEGORY = {}
+# TODO: add os.path.normpath()
+mod_path = os.path.join(os.path.abspath(os.path.dirname(cobbler.__file__)), 'modules')
 
-cp = ConfigParser.ConfigParser()
-cp.read("/etc/cobbler/modules.conf")
-
-plib = distutils.sysconfig.get_python_lib()
-mod_path = "%s/cobbler/modules" % plib
-sys.path.insert(0, mod_path)
-sys.path.insert(1, "%s/cobbler" % plib)
+MODULE_CACHE: Dict[str, Any] = {}
+MODULES_BY_CATEGORY: Dict[str, Dict[str, Any]] = {}
 
 
-def load_modules(module_path=mod_path, blacklist=None):
-    logger = clogger.Logger()
+logger = logging.getLogger()
+
+
+def load_modules(module_path: str = mod_path):
+    """
+    Load the modules from the path handed to the function into Cobbler.
+
+    :param module_path: The path which should be considered as the root module path.
+    :return: Two dictionary's with the dynamically loaded modules.
+    """
 
     filenames = glob.glob("%s/*.py" % module_path)
     filenames += glob.glob("%s/*.pyc" % module_path)
     filenames += glob.glob("%s/*.pyo" % module_path)
-
-    mods = set()
+    # Allow recursive modules
+    filenames += glob.glob("%s/**/*.py" % module_path)
+    filenames += glob.glob("%s/**/*.pyc" % module_path)
+    filenames += glob.glob("%s/**/*.pyo" % module_path)
 
     for fn in filenames:
-        basename = os.path.basename(fn)
-        if basename == "__init__.py":
+        # FIXME: Use module_path instead of mod_path
+        basename = fn.replace(mod_path, '')
+        modname = ""
+
+        if basename.__contains__("__pycache__") or basename.__contains__("__init__.py"):
             continue
+
+        if basename[0] == "/":
+            basename = basename[1:]
+
+        basename = basename.replace("/", ".")
+
         if basename[-3:] == ".py":
             modname = basename[:-3]
         elif basename[-4:] in [".pyc", ".pyo"]:
             modname = basename[:-4]
 
-        # No need to try importing the same module over and over if
-        # we have a .py, .pyc, and .pyo
-        if modname in mods:
-            continue
-        mods.add(modname)
+        # FIXME: Use module_path instead of mod_path
+        __import_module(mod_path, modname)
 
-        try:
-            blip = __import__("modules.%s" % (modname), globals(), locals(), [modname])
-            if not hasattr(blip, "register"):
-                if not modname.startswith("__init__"):
-                    errmsg = _("%(module_path)s/%(modname)s is not a proper module")
-                    print errmsg % {'module_path': module_path, 'modname': modname}
-                continue
-            category = blip.register()
-            if category:
-                MODULE_CACHE[modname] = blip
-            if category not in MODULES_BY_CATEGORY:
-                MODULES_BY_CATEGORY[category] = {}
-            MODULES_BY_CATEGORY[category][modname] = blip
-        except Exception:
-            logger.info('Exception raised when loading module %s' % modname)
-            log_exc(logger)
-
-    return (MODULE_CACHE, MODULES_BY_CATEGORY)
+    return MODULE_CACHE, MODULES_BY_CATEGORY
 
 
-def get_module_by_name(name):
+def __import_module(module_path: str, modname: str):
+    """
+    Import a module which is not part of the core functionality of Cobbler.
+
+    :param module_path: The path to the module.
+    :param modname: The name of the module.
+    """
+    try:
+        blip = import_module("cobbler.modules.%s" % modname)
+        if not hasattr(blip, "register"):
+            if not modname.startswith("__init__"):
+                errmsg = "%(module_path)s/%(modname)s is not a proper module"
+                print(errmsg % {'module_path': module_path, 'modname': modname})
+            return None
+        category = blip.register()
+        if category:
+            MODULE_CACHE[modname] = blip
+        if category not in MODULES_BY_CATEGORY:
+            MODULES_BY_CATEGORY[category] = {}
+        MODULES_BY_CATEGORY[category][modname] = blip
+    except Exception:
+        logger.info('Exception raised when loading module %s' % modname)
+        log_exc()
+
+
+def get_module_by_name(name: str):
+    """
+    Get a module by its name. The category of the module is not needed.
+
+    :param name: The name of the module.
+    :return: The module asked by the function parameter.
+    """
     return MODULE_CACHE.get(name, None)
 
 
-def get_module_name(category, field, fallback_module_name=None):
+def get_module_name(category: str, field: str, fallback_module_name: Optional[str] = None) -> str:
     """
-    Get module name from configuration file
+    Get module name from configuration file (currently hardcoded ``/etc/cobbler/modules.conf``).
 
-    @param str category field category in configuration file
-    @param str field field in configuration file
-    @param str fallback_module_name default value used if category/field is
-            not found in configuration file
-    @raise CX if unable to find configuration file
-    @return str module name
+    :param category: Field category in configuration file.
+    :param field: Field in configuration file
+    :param fallback_module_name: Default value used if category/field is not found in configuration file
+    :raises FileNotFoundError: If unable to find configuration file.
+    :raises ValueError: If the category does not exist or the field is empty.
+    :raises CX: If the field could not be read and no fallback_module_name was given.
+    :returns: The name of the module.
     """
+    modules_conf_path = "/etc/cobbler/modules.conf"
+    if not os.path.exists(modules_conf_path):
+        raise FileNotFoundError("Configuration file at \"%s\" not found" % modules_conf_path)
+
+    cp = ConfigParser()
+    cp.read(modules_conf_path)
+
+    # FIXME: We can't enabled this check since it is to strict atm.
+    # if category not in MODULES_BY_CATEGORY:
+    # raise ValueError("category must be one of: %s" % MODULES_BY_CATEGORY.keys())
+
+    if field.isspace():
+        raise ValueError("field cannot be empty. Did you mean \"module\" maybe?")
 
     try:
         value = cp.get(category, field)
@@ -110,33 +151,37 @@ def get_module_name(category, field, fallback_module_name=None):
         if fallback_module_name is not None:
             value = fallback_module_name
         else:
-            raise CX(_("Cannot find config file setting for: %s") % field)
+            raise CX("Cannot find config file setting for: %s" % field)
     return value
 
 
-def get_module_from_file(category, field, fallback_module_name=None):
+def get_module_from_file(category: str, field: str, fallback_module_name: Optional[str] = None):
     """
     Get Python module, based on name defined in configuration file
 
-    @param str category field category in configuration file
-    @param str field field in configuration file
-    @param str fallback_module_name default value used if category/field is
-            not found in configuration file
-    @raise CX if unable to load Python module
-    @return module Python module
+    :param category: field category in configuration file
+    :param field: field in configuration file
+    :param fallback_module_name: default value used if category/field is not found in configuration file
+    :raises CX: If unable to load Python module
+    :returns: A Python module.
     """
 
     module_name = get_module_name(category, field, fallback_module_name)
-    rc = MODULE_CACHE.get(module_name, None)
-    if rc is None:
-        raise CX(_("Failed to load module for %s/%s") % (category, field))
-    return rc
+    requested_module = MODULE_CACHE.get(module_name, None)
+    if requested_module is None:
+        raise CX("Failed to load module for %s/%s" % (category, field))
+    return requested_module
 
 
-def get_modules_in_category(category):
+def get_modules_in_category(category: str) -> list:
+    """
+    Return all modules of a module category.
+
+    :param category: The module category.
+    :return: A list of all modules of that category. Returns an empty list if the Category does not exist.
+    """
     if category not in MODULES_BY_CATEGORY:
+        # FIXME: We can't enabled this check since it is to strict atm.
+        # raise ValueError("category must be one of: %s" % MODULES_BY_CATEGORY.keys())
         return []
-    return MODULES_BY_CATEGORY[category].values()
-
-if __name__ == "__main__":
-    print load_modules(mod_path)
+    return list(MODULES_BY_CATEGORY[category].values())

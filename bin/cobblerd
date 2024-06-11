@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 """
 Wrapper for cobbler's remote syslog watching daemon.
 
@@ -13,31 +13,34 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301  USA.
 """
-
+import logging
 import sys
 import os
 import traceback
-import optparse
+import argparse
 import cobbler.cobblerd as app
 import cobbler.api as cobbler_api
 
 
+logger = logging.getLogger()
+
+
 def daemonize_self():
     # daemonizing code:  http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/66012
-    # logger.info("cobblerd started")
+    logger.info("cobblerd started")
     try:
         pid = os.fork()
         if pid > 0:
             # exit first parent
             sys.exit(0)
-    except OSError, e:
-        print >>sys.stderr, "fork #1 failed: %d (%s)" % (e.errno, e.strerror)
+    except OSError as e:
+        print("fork #1 failed: %d (%s)" % (e.errno, e.strerror), file=sys.stderr)
         sys.exit(1)
 
     # decouple from parent environment
     os.chdir("/")
     os.setsid()
-    os.umask(022)
+    os.umask(0o22)
 
     # do second fork
     try:
@@ -45,53 +48,65 @@ def daemonize_self():
         if pid > 0:
             # print "Daemon PID %d" % pid
             sys.exit(0)
-    except OSError, e:
-        print >>sys.stderr, "fork #2 failed: %d (%s)" % (e.errno, e.strerror)
+    except OSError as e:
+        print("fork #2 failed: %d (%s)" % (e.errno, e.strerror), file=sys.stderr)
         sys.exit(1)
 
-    dev_null = file('/dev/null', 'rw')
-    os.dup2(dev_null.fileno(), sys.stdin.fileno())
-    os.dup2(dev_null.fileno(), sys.stdout.fileno())
-    os.dup2(dev_null.fileno(), sys.stderr.fileno())
+    with open("/dev/null", "r+") as dev_null:
+        os.dup2(dev_null.fileno(), sys.stdin.fileno())
+        os.dup2(dev_null.fileno(), sys.stdout.fileno())
+        os.dup2(dev_null.fileno(), sys.stderr.fileno())
 
 
-def main():
-    op = optparse.OptionParser()
+def main() -> int:
+    op = argparse.ArgumentParser()
     op.set_defaults(daemonize=True, log_level=None)
-    op.add_option('-B', '--daemonize', dest='daemonize', action='store_true',
-                  help='run in background (default)')
-    op.add_option('-F', '--no-daemonize', dest='daemonize', action='store_false',
-                  help='run in foreground (do not daemonize)')
-    op.add_option('-f', '--log-file', dest='log_file', metavar='NAME',
-                  help='file to log to')
-    op.add_option('-l', '--log-level', dest='log_level', metavar='LEVEL',
-                  help='log level (ie. INFO, WARNING, ERROR, CRITICAL)')
+    op.add_argument("-B", "--daemonize", dest="daemonize", action="store_true",
+                    help="run in background (default)")
+    op.add_argument("-F", "--no-daemonize", dest="daemonize", action="store_false",
+                    help="run in foreground (do not daemonize)")
+    op.add_argument("-f", "--log-file", dest="log_file", metavar="NAME",
+                    help="file to log to")
+    op.add_argument("-l", "--log-level", dest="log_level", metavar="LEVEL",
+                    help="log level (ie. INFO, WARNING, ERROR, CRITICAL)")
+    op.add_argument("--config", "-c",
+                    help="The location of the Cobbler configuration file.",
+                    default="/etc/cobbler/settings.yaml")
+    op.add_argument("--enable-automigration",
+                    help='If given, overrule setting from "settings.yaml" and execute automigration.',
+                    dest="automigration",
+                    action="store_true")
+    op.add_argument("--disable-automigration",
+                    help='If given, overrule setting from "settings.yaml" and do not execute automigration.',
+                    dest="automigration",
+                    action="store_false")
+    op.set_defaults(automigration=None)
 
-    options, args = op.parse_args()
+    options = op.parse_args()
 
     # load the API now rather than later, to ensure cobblerd
     # startup time is done before the service returns
     api = None
     try:
-        api = cobbler_api.CobblerAPI(is_cobblerd=True)
-    except Exception, exc:
-        if sys.exc_type == SystemExit:
+        api = cobbler_api.CobblerAPI(is_cobblerd=True, settingsfile_location=options.config,
+                                     execute_settings_automigration=options.automigration)
+    except Exception as exc:
+        if sys.exc_info()[0] == SystemExit:
             return exc.code
         else:
             # FIXME: log this too
             traceback.print_exc()
             return 1
 
-    logger = api.logger
-
     if options.daemonize:
         daemonize_self()
 
     try:
         app.core(api)
-    except Exception, e:
+    except Exception as e:
         logger.error(e)
         traceback.print_exc()
 
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

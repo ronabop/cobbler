@@ -19,54 +19,58 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 """
 
 
-import distutils.sysconfig
-import sys
 import os
 
-from cobbler.cexceptions import CX
 import cobbler.utils as utils
 
-plib = distutils.sysconfig.get_python_lib()
-mod_path = "%s/cobbler" % plib
-sys.path.insert(0, mod_path)
+from cobbler.cexceptions import CX
 
 
-def register():
-    # this pure python trigger acts as if it were a legacy shell-trigger, but is much faster.
-    # the return of this method indicates the trigger type
+def register() -> str:
+    """
+    This pure python trigger acts as if it were a legacy shell-trigger, but is much faster. The return of this method
+    indicates the trigger type
+    :return: Always: ``/var/lib/cobbler/triggers/change/*``
+    """
+
     return "/var/lib/cobbler/triggers/change/*"
 
 
-def run(api, args, logger):
+def run(api, args):
+    """
+    Runs the trigger, meaning in this case track any changed which happen to a config or data file.
 
+    :param api: The api instance of the Cobbler server. Used to look up if scm_track_enabled is true.
+    :param args: The parameter is currently unused for this trigger.
+    :return: 0 on success, otherwise an exception is risen.
+    """
     settings = api.settings()
-    scm_track_enabled = str(settings.scm_track_enabled).lower()
+
+    if not settings.scm_track_enabled:
+        # feature disabled
+        return 0
+
     mode = str(settings.scm_track_mode).lower()
     author = str(settings.scm_track_author)
     push_script = str(settings.scm_push_script)
-
-    if scm_track_enabled not in ["y", "yes", "1", "true"]:
-        # feature disabled
-        return 0
 
     if mode == "git":
         old_dir = os.getcwd()
         os.chdir("/var/lib/cobbler")
         if os.getcwd() != "/var/lib/cobbler":
-            raise "danger will robinson"
+            raise CX("danger will robinson")
 
         if not os.path.exists("/var/lib/cobbler/.git"):
-            utils.subprocess_call(logger, "git init", shell=True)
+            utils.subprocess_call(["git", "init"], shell=False)
 
-        # FIXME: if we know the remote user of an XMLRPC call
-        # use them as the author
-        utils.subprocess_call(logger, "git add --all config", shell=True)
-        utils.subprocess_call(logger, "git add --all autoinstall_templates", shell=True)
-        utils.subprocess_call(logger, "git add --all snippets", shell=True)
-        utils.subprocess_call(logger, "git commit -m 'API update' --author '{0}'".format(author), shell=True)
+        # FIXME: If we know the remote user of an XMLRPC call use them as the author
+        utils.subprocess_call(["git", "add", "--all", "collections"], shell=False)
+        utils.subprocess_call(["git", "add", "--all", "templates"], shell=False)
+        utils.subprocess_call(["git", "add", "--all", "snippets"], shell=False)
+        utils.subprocess_call(["git", "commit", "-m", "API", "update", "--author", author], shell=False)
 
         if push_script:
-            utils.subprocess_call(logger, push_script, shell=True)
+            utils.subprocess_call([push_script], shell=False)
 
         os.chdir(old_dir)
         return 0
@@ -76,20 +80,19 @@ def run(api, args, logger):
         old_dir = os.getcwd()
         os.chdir("/var/lib/cobbler")
         if os.getcwd() != "/var/lib/cobbler":
-            raise "danger will robinson"
+            raise CX("danger will robinson")
 
         if not os.path.exists("/var/lib/cobbler/.hg"):
-            utils.subprocess_call(logger, "hg init", shell=True)
+            utils.subprocess_call(["hg", "init"], shell=False)
 
-        # FIXME: if we know the remote user of an XMLRPC call
-        # use them as the user
-        utils.subprocess_call(logger, "hg add config", shell=True)
-        utils.subprocess_call(logger, "hg add autoinstall_templates", shell=True)
-        utils.subprocess_call(logger, "hg add snippets", shell=True)
-        utils.subprocess_call(logger, "hg commit -m 'API update' --user '{0}'".format(author), shell=True)
+        # FIXME: If we know the remote user of an XMLRPC call use them as the user
+        utils.subprocess_call(["hg", "add collections"], shell=False)
+        utils.subprocess_call(["hg", "add templates"], shell=False)
+        utils.subprocess_call(["hg", "add snippets"], shell=False)
+        utils.subprocess_call(["hg", "commit", "-m", "API", "update", "--user", author], shell=False)
 
         if push_script:
-            utils.subprocess_call(logger, push_script, shell=True)
+            utils.subprocess_call([push_script], shell=False)
 
         os.chdir(old_dir)
         return 0

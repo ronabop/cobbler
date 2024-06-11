@@ -1,5 +1,5 @@
 """
-Serializer code for cobbler
+Serializer code for Cobbler
 Now adapted to support different storage backends
 
 Copyright 2006-2009, Red Hat, Inc and Others
@@ -34,7 +34,7 @@ LOCK_HANDLE = None
 
 
 def handler(num, frame):
-    print >> sys.stderr, "Ctrl-C not allowed during writes.  Please wait."
+    print("Ctrl-C not allowed during writes. Please wait.", file=sys.stderr)
     return True
 
 
@@ -59,12 +59,12 @@ def __grab_lock():
 
 def __release_lock(with_changes=False):
     if with_changes:
-        # this file is used to know the time of last modification on collections
+        # this file is used to know the time of last modification on cobbler_collections
         # was made -- allowing the API to work more smoothly without
         # a lot of unneccessary reloads.
-        fd = os.open("/var/lib/cobbler/.mtime", os.O_CREAT | os.O_RDWR, 0200)
-        os.write(fd, "%f" % time.time())
-        os.close(fd)
+        fd = open("/var/lib/cobbler/.mtime", 'w')
+        fd.write("%f" % time.time())
+        fd.close()
     if LOCK_ENABLED:
         LOCK_HANDLE = open("/var/lib/cobbler/lock", "r")
         fcntl.flock(LOCK_HANDLE.fileno(), fcntl.LOCK_UN)
@@ -75,7 +75,7 @@ def serialize(collection):
     """
     Save a collection to disk
 
-    @param Collection collection collection
+    :param collection: The collection to serialize.
     """
 
     __grab_lock()
@@ -88,8 +88,8 @@ def serialize_item(collection, item):
     """
     Save a collection item to disk
 
-    @param Collection collection collection
-    @param Item item collection item
+    :param collection: The Cobbler collection to know the type of the item.
+    :param item: The collection item to serialize.
     """
 
     __grab_lock()
@@ -102,8 +102,8 @@ def serialize_delete(collection, item):
     """
     Delete a collection item from disk
 
-    @param Collection collection collection
-    @param Item item collection item
+    :param collection: The Cobbler collection to know the type of the item.
+    :param item: The collection item to delete.
     """
 
     __grab_lock()
@@ -112,12 +112,16 @@ def serialize_delete(collection, item):
     __release_lock(with_changes=True)
 
 
-def deserialize(collection, topological=True):
+def deserialize(collection, topological: bool = True):
     """
-    Load a collection from disk
+    Load a collection from disk.
 
-    @param Collection collection collection
-    @param bool topological
+    :param collection: The Cobbler collection to know the type of the item.
+    :param topological: Sort collection based on each items' depth attribute
+                        in the list of collection items.  This ensures
+                        properly ordered object loading from disk with
+                        objects having parent/child relationships, i.e.
+                        profiles/subprofiles.  See cobbler/items/item.py
     """
     __grab_lock()
     storage_module = __get_storage_module(collection.collection_type())
@@ -128,7 +132,8 @@ def deserialize(collection, topological=True):
 def __get_storage_module(collection_type):
     """
     Look up serializer in /etc/cobbler/modules.conf
-    """
-    return module_loader.get_module_from_file("serializers", collection_type, "serializer_file")
 
-# EOF
+    :param collection_type: str
+    :returns: A Python module.
+    """
+    return module_loader.get_module_from_file("serializers", collection_type, "serializers.file")

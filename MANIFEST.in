@@ -1,7 +1,8 @@
-include COPYING AUTHORS README
+include COPYING AUTHORS
 include cobbler.spec config/service/cobblerd.service
-
-recursive-include aux *
+include AUTHORS.in README.md
+include distro_build_configs.sh
+recursive-include misc *
 recursive-include bin *
 recursive-include config *
 recursive-include docs *
@@ -9,5 +10,3 @@ recursive-include templates *
 recursive-include autoinstall_snippets *
 recursive-include autoinstall_templates *
 recursive-include autoinstall_scripts *
-recursive-include web *
-

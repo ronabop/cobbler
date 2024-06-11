@@ -1,5 +1,5 @@
 """
-cobbler daemon for logging remote syslog traffic during automatic installation
+Cobbler daemon for logging remote syslog traffic during automatic installation
 
 Copyright 2007-2009, Red Hat, Inc and Others
 Michael DeHaan <michael.dehaan AT gmail>
@@ -21,37 +21,45 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 """
 
 import binascii
+import logging.config
 import os
 import pwd
-import sys
 import time
 
-import api as cobbler_api
-import remote
-import utils
+from cobbler import remote, utils
+from cobbler.api import CobblerAPI
+
+if os.geteuid() == 0 and os.path.exists('/etc/cobbler/logging_config.conf'):
+    logging.config.fileConfig('/etc/cobbler/logging_config.conf')
 
 
-def core(api):
-    cobbler_api = api
+logger = logging.getLogger()
+
+
+def core(cobbler_api: CobblerAPI):
+    """
+    Starts Cobbler.
+
+    :param cobbler_api: The cobbler_api instance which is used for this method.
+    """
     settings = cobbler_api.settings()
     xmlrpc_port = settings.xmlrpc_port
 
     regen_ss_file()
-    do_xmlrpc_tasks(cobbler_api, settings, xmlrpc_port)
+    do_xmlrpc_rw(cobbler_api, xmlrpc_port)
 
 
 def regen_ss_file():
-    # this is only used for Kerberos auth at the moment.
-    # it identifies XMLRPC requests from Apache that have already
-    # been cleared by Kerberos.
+    """
+    This is only used for Kerberos auth at the moment. It identifies XMLRPC requests from Apache that have already been
+    cleared by Kerberos.
+    """
     ssfile = "/var/lib/cobbler/web.ss"
-    fd = open("/dev/urandom")
-    data = fd.read(512)
-    fd.close()
+    with open("/dev/urandom", 'rb') as fd:
+        data = fd.read(512)
 
-    fd = os.open(ssfile, os.O_CREAT | os.O_RDWR, 0600)
-    os.write(fd, binascii.hexlify(data))
-    os.close(fd)
+    with open(ssfile, 'wb', 0o660) as fd:
+        fd.write(binascii.hexlify(data))
 
     http_user = "apache"
     family = utils.get_family()
@@ -61,31 +69,31 @@ def regen_ss_file():
         http_user = "wwwrun"
     os.lchown("/var/lib/cobbler/web.ss", pwd.getpwnam(http_user)[2], -1)
 
-    return 1
 
+def do_xmlrpc_rw(cobbler_api: CobblerAPI, port):
+    """
+    This trys to bring up the Cobbler xmlrpc_api and restart it if it fails.
 
-def do_xmlrpc_tasks(cobbler_api, settings, xmlrpc_port):
-    do_xmlrpc_rw(cobbler_api, settings, xmlrpc_port)
-
-
-def log(logger, msg):
-    if logger is not None:
-        logger.info(msg)
-    else:
-        print >>sys.stderr, msg
-
-
-def do_xmlrpc_rw(cobbler_api, settings, port):
-
+    :param cobbler_api: The cobbler_api instance which is used for this method.
+    :param port: The port where the xmlrpc api should run on.
+    """
     xinterface = remote.ProxiedXMLRPCInterface(cobbler_api, remote.CobblerXMLRPCInterface)
     server = remote.CobblerXMLRPCServer(('127.0.0.1', port))
     server.logRequests = 0      # don't print stuff
-    xinterface.logger.debug("XMLRPC running on %s" % port)
+    logger.debug("XMLRPC running on %s", port)
     server.register_instance(xinterface)
+    start_time = ""
+    try:
+        import psutil
+        p = psutil.Process(os.getpid())
+        start_time = " in %s seconds" % str(time.time() - p.create_time())
+    except ModuleNotFoundError:
+        # This is not critical, but debug only - just install python3-psutil
+        pass
 
     while True:
         try:
-            print "SERVING!"
+            logger.info("Cobbler startup completed %s", start_time)
             server.serve_forever()
         except IOError:
             # interrupted? try to serve again
@@ -93,7 +101,4 @@ def do_xmlrpc_rw(cobbler_api, settings, port):
 
 
 if __name__ == "__main__":
-    cobbler_api = cobbler_api.CobblerAPI()
-    settings = cobbler_api.settings()
-    regen_ss_file()
-    do_xmlrpc_rw(cobbler_api, settings, 25151)
+    core(CobblerAPI())

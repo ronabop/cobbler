@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """
 Copyright 2007-2009, Red Hat, Inc and Others
@@ -20,7 +20,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301  USA
 """
 
-from xmlrpclib import ServerProxy
+from xmlrpc.client import ServerProxy
 import optparse
 
 if __name__ == "__main__":
@@ -28,17 +28,14 @@ if __name__ == "__main__":
     p.add_option("-u","--user",dest="user",default="test")
     p.add_option("-p","--pass",dest="password",default="test")
 
-    # NOTE: if you've changed your xmlrpc_rw port or 
+    # NOTE: if you've changed your xmlrpc_rw port or
     # disabled xmlrpc_rw this test probably won't work
 
     sp = ServerProxy("http://127.0.0.1:25151")
     (options, args) = p.parse_args()
-    print "- trying to login with user=%s" % options.user
+    print("- trying to login with user=%s" % options.user)
     token = sp.login(options.user,options.password)
-    print "- token: %s" % token
-    print "- authenticated ok, now seeing if user is authorized"
+    print("- token: %s" % token)
+    print("- authenticated ok, now seeing if user is authorized")
     check = sp.check_access(token,"imaginary_method_name")
-    print "- access ok? %s" % check
-
-
-
+    print("- access ok? %s" % check)

@@ -19,7 +19,7 @@
     ## different versions of RHEL.  These probably should be set for Fedora too.
     ## RHEL < 6: /etc/modprobe.conf
     ## RHEL >= 6: /etc/modprobe.d/bonding.conf
-    #if $osversion == "rhel6" or $osversion == "rhel7"
+    #if $osversion == "rhel6" or $osversion == "rhel7" or $osversion == "ovz7"
         #set $mp_bonding = "/etc/modprobe.d/bonding.conf"
     #else
         #set $mp_bonding = "/etc/modprobe.conf"
@@ -114,7 +114,6 @@ mv /etc/sysconfig/network.cobbler /etc/sysconfig/network
         #set $idata                = $interfaces[$iname]
         #set $mac                  = $idata.get("mac_address", "").upper()
         #set $connected_mode       = $idata.get("connected_mode", "")
-        #set $mtu                  = $idata.get("mtu", "")
         #set $static               = $idata.get("static", "")
         #set $ip                   = $idata.get("ip_address", "")
         #set $netmask              = $idata.get("netmask", "")
@@ -125,10 +124,18 @@ mv /etc/sysconfig/network.cobbler /etc/sysconfig/network
         #set $bonding_opts         = $idata.get("bonding_opts", "")
         #set $bridge_opts          = $idata.get("bridge_opts", "").split(" ")
         #set $ipv6_address         = $idata.get("ipv6_address", "")
+        #set $ipv6_prefix          = $idata.get("ipv6_prefix", "")
         #set $ipv6_secondaries     = $idata.get("ipv6_secondaries", "")
-        #set $ipv6_mtu             = $idata.get("ipv6_mtu", "")
         #set $ipv6_default_gateway = $idata.get("ipv6_default_gateway", "")
         #set $ipv6_static_routes   = $idata.get("ipv6_static_routes", "")
+        ## Inherit slave mtu from master
+        #if $iface_type.lower() in ("bond_slave","bridge_slave","bonded_bridge_slave")
+            #set $mtu              = $interfaces[$iface_master].get("mtu", "")
+            #set $ipv6_mtu         = $interfaces[$iface_master].get("ipv6_mtu", "")
+        #else
+            #set $mtu              = $idata.get("mtu", "")
+            #set $ipv6_mtu         = $idata.get("ipv6_mtu", "")
+        #end if
         #set $devfile              = "/etc/sysconfig/network-scripts/cobbler/ifcfg-" + $iname
         #set $routesfile           = "/etc/sysconfig/network-scripts/cobbler/route-" + $iname
         #set $ipv6_routesfile      = "/etc/sysconfig/network-scripts/cobbler/route6-" + $iname
@@ -139,6 +146,9 @@ mv /etc/sysconfig/network.cobbler /etc/sysconfig/network
         ## determine if this interface is for a VLAN
         #if $vlanpattern.match($iname)
             #set $is_vlan = "true"
+            ## Set the vlan name
+            #set $vlan_device = $iname.split(".")[0]
+            #set $vlan_id = $iname.split(".")[1]            
         #else
             #set $is_vlan = "false"
         #end if
@@ -167,13 +177,18 @@ fi
         ## ===================================================================
         ## Actions based on interface_type
         ## ===================================================================
+        #if $iface_type == "bond_slave" and $iface_master != ""
+echo "SLAVE=yes" >> $devfile
+echo "MASTER=$iface_master" >> $devfile
+echo "HOTPLUG=no" >> $devfile
+        #end if
         #if $iface_type in ("bond","bonded_bridge_slave")
             ## if this is a bonded interface, configure it in modprobe.conf
             #if $osversion == "rhel4"
 if [ -f "$mp_bonding" ]; then
     echo "install $iname /sbin/modprobe bonding -o $iname $bonding_opts" >> $(mp_bonding).cobbler
 fi
-            #elif $osversion == "rhel7"
+            #elif $osversion == "rhel7" or $osversion == "ovz7"
             ## Add required bonding options to interface file
 echo "TYPE=Bond" >> $devfile
 echo "BONDING_MASTER=yes" >> $devfile
@@ -187,12 +202,7 @@ cat >> $devfile << EOF
 BONDING_OPTS="$bonding_opts"
 EOF
             #end if
-        #elif $iface_type == "bond_slave" and $iface_master != ""
-echo "SLAVE=yes" >> $devfile
-echo "MASTER=$iface_master" >> $devfile
-echo "HOTPLUG=no" >> $devfile
-        #end if
-        #if $iface_type == "bridge"
+        #elif $iface_type == "bridge"
 echo "TYPE=Bridge" >> $devfile
             #for $bridge_opt in $bridge_opts
                 #if $bridge_opt.strip() != ""
@@ -205,6 +215,8 @@ echo "BRIDGE=$iface_master" >> $devfile
 echo "HOTPLUG=no" >> $devfile
         #elif $iface_type == "infiniband"
 echo "TYPE=InfiniBand" >> $devfile
+        #elif $is_vlan == "true"
+echo "TYPE=VLan" >> $devfile
         #else
 echo "TYPE=Ethernet" >> $devfile
         #end if
@@ -235,7 +247,7 @@ echo "NETMASK=$netmask" >> $devfile
             #if $enableipv6 == True and $ipv6_autoconfiguration == False
                 #if $ipv6_address != ""
 echo "IPV6INIT=yes" >> $devfile
-echo "IPV6ADDR=$ipv6_address" >> $devfile
+echo "IPV6ADDR=$ipv6_address/$ipv6_prefix" >> $devfile
                 #end if
                 #if $ipv6_secondaries != ""
                     #set ipv6_secondaries = ' '.join(ipv6_secondaries)
@@ -261,7 +273,8 @@ echo "PEERDNS=no" >> $devfile
         ## ===================================================================
         #if $is_vlan == "true"
 echo "VLAN=yes" >> $devfile
-echo "ONPARENT=yes" >> $devfile
+echo "VLAN_ID=$vlan_id" >> $devfile
+echo "PHYSDEV=$vlan_device" >> $devfile        
         #end if
         ## ===================================================================
         ## Optional configuration stuff
@@ -345,7 +358,7 @@ echo "nameserver $nameserver" >>/etc/resolv.conf
 ## the old files with the new ones in the working directory
 ## This stops unneccesary (and time consuming) DHCP queries
 ## during the network initialization
-sed -i 's/ONBOOT=yes/ONBOOT=no/g' /etc/sysconfig/network-scripts/ifcfg-eth*
+sed -i 's/ONBOOT=\("\)\?yes\("\)\?/ONBOOT=\1no\2/g' /etc/sysconfig/network-scripts/ifcfg-eth*
 
 ## Move all staged files to their final location
     #for $iname in $ikeys
